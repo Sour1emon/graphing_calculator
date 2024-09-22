@@ -1,7 +1,6 @@
 use eframe::egui::{Color32, Pos2, Stroke};
 use eframe::emath::Rect;
-use egui::epaint::PathStroke;
-use egui::{Align2, FontId, Shape, Vec2};
+use egui::{pos2, Align2, FontId, Shape, Vec2};
 use std::iter::StepBy;
 use std::ops::RangeInclusive;
 
@@ -15,7 +14,7 @@ fn main() -> eframe::Result {
 }
 
 fn y(x: f32) -> f32 {
-    x.powi(2)
+    1.0/x
 }
 
 struct MyEguiApp {
@@ -27,7 +26,7 @@ impl MyEguiApp {
         Self {
             graph_config: GraphConfig {
                 screen_rect: cc.egui_ctx.screen_rect(),
-                offset: Pos2::new(0.0, 0.0),
+                offset: pos2(0.0, 0.0),
             },
         }
     }
@@ -59,8 +58,6 @@ impl eframe::App for MyEguiApp {
             let center_x = rect.left() + (rect.width() / 2.0);
             let center_y = rect.top() + (rect.height() / 2.0);
 
-            println!("X: {} Y: {} Center Pos: {}", center_x, center_y, center_pos);
-
             let graph_width = rect.width() as i32 / GRID_SIZE as i32 + 1;
             let graph_height = rect.height() as i32 / GRID_SIZE as i32 + 1;
 
@@ -68,65 +65,62 @@ impl eframe::App for MyEguiApp {
 
             for x in ((-graph_width / 2)..=graph_width / 2).map(|x| x as f32 * GRID_SIZE) {
                 let x_pos = center_x + x - (self.graph_config.offset.x.fract() * GRID_SIZE);
-                draw_queue.push(Shape::LineSegment {
-                    points: [
-                        Pos2::new(x_pos, rect.top()),
-                        Pos2::new(x_pos, rect.bottom()),
-                    ],
-                    stroke: PathStroke::from(Stroke::new(1.0, MINOR_LINE_COLOR)),
-                });
+                draw_queue.push(Shape::line_segment(
+                    [pos2(x_pos, rect.top()), pos2(x_pos, rect.bottom())],
+                    Stroke::new(1.0, MINOR_LINE_COLOR),
+                ));
             }
 
             for y in ((-graph_height / 2)..=graph_height / 2).map(|x| x as f32 * GRID_SIZE) {
                 let y_pos = center_y + y + self.graph_config.offset.y.fract() * GRID_SIZE;
-                draw_queue.push(Shape::LineSegment {
-                    points: [
-                        Pos2::new(rect.left(), y_pos),
-                        Pos2::new(rect.right(), y_pos),
-                    ],
-                    stroke: PathStroke::from(Stroke::new(1.0, MINOR_LINE_COLOR)),
-                });
+                draw_queue.push(Shape::line_segment(
+                    [pos2(rect.left(), y_pos), pos2(rect.right(), y_pos)],
+                    Stroke::new(1.0, MINOR_LINE_COLOR),
+                ));
             }
 
-            painter.line_segment(
+            draw_queue.push(Shape::line_segment(
                 [
-                    Pos2::new(center_pos.x, rect.top()),
-                    Pos2::new(center_pos.x, rect.bottom()),
+                    pos2(center_pos.x, rect.top()),
+                    pos2(center_pos.x, rect.bottom()),
                 ],
                 Stroke::new(2.0, MAJOR_LINE_COLOR),
-            );
-            painter.line_segment(
+            ));
+            draw_queue.push(Shape::line_segment(
                 [
-                    Pos2::new(rect.left(), center_pos.y),
-                    Pos2::new(rect.right(), center_pos.y),
+                    pos2(rect.left(), center_pos.y),
+                    pos2(rect.right(), center_pos.y),
                 ],
                 Stroke::new(2.0, MAJOR_LINE_COLOR),
-            );
-            let mut prev_line: Option<GraphPoint> = None;
+            ));
+
+            let mut prev_line: Option<Pos2> = None;
             let mut set_prev_line = false;
             let offset = self.graph_config.offset;
             for i in (-(rect.width() / 2.0 + GRID_SIZE * 2.0) + (offset.x * GRID_SIZE)) as i64
                 ..((rect.width() / 2.0 + GRID_SIZE * 2.0) + (offset.x * GRID_SIZE)) as i64
             {
                 if !set_prev_line {
-                    prev_line = Some(GraphPoint {
-                        x: i as f32 / GRID_SIZE,
-                        y: y(i as f32 / GRID_SIZE),
-                    });
+                    prev_line = Some(
+                        GraphPoint {
+                            x: i as f32 / GRID_SIZE,
+                            y: y(i as f32 / GRID_SIZE),
+                        }
+                        .point_on_screen(self.graph_config),
+                    );
                     set_prev_line = true;
                     continue;
                 }
-                let p1 = GraphPoint {
+                let p1 = prev_line.unwrap();
+                let p2 = GraphPoint {
                     x: i as f32 / GRID_SIZE,
                     y: y(i as f32 / GRID_SIZE),
-                };
-                painter.line_segment(
-                    [
-                        prev_line.unwrap().point_on_screen(self.graph_config),
-                        p1.point_on_screen(self.graph_config),
-                    ],
+                }
+                .point_on_screen(self.graph_config);
+                draw_queue.push(Shape::line_segment(
+                    [p1, p2],
                     Stroke::new(2.0, Color32::RED),
-                );
+                ));
                 prev_line = Some(p1);
             }
             for i in create_draw_text_iter(graph_width, offset.x) {
@@ -135,13 +129,16 @@ impl eframe::App for MyEguiApp {
                     y: NUM_LABEL_OFFSET,
                 }
                 .point_on_screen(self.graph_config);
-                painter.text(
-                    text_pos,
-                    Align2::CENTER_CENTER,
-                    i.to_string(),
-                    FontId::default(),
-                    Color32::WHITE,
-                );
+                draw_queue.push(ui.fonts(|f| {
+                    Shape::text(
+                        f,
+                        text_pos,
+                        Align2::CENTER_CENTER,
+                        i.to_string(),
+                        FontId::default(),
+                        Color32::WHITE,
+                    )
+                }));
             }
             for i in create_draw_text_iter(graph_height, offset.y) {
                 if i == 0 {
@@ -152,14 +149,18 @@ impl eframe::App for MyEguiApp {
                     y: i as f32,
                 }
                 .point_on_screen(self.graph_config);
-                painter.text(
-                    text_pos,
-                    Align2::CENTER_CENTER,
-                    i.to_string(),
-                    FontId::default(),
-                    Color32::WHITE,
-                );
+                draw_queue.push(ui.fonts(|f| {
+                    Shape::text(
+                        f,
+                        text_pos,
+                        Align2::CENTER_CENTER,
+                        i.to_string(),
+                        FontId::default(),
+                        Color32::WHITE,
+                    )
+                }));
             }
+            painter.extend(draw_queue);
         });
     }
 }
@@ -178,7 +179,7 @@ struct GraphConfig {
 
 impl GraphConfig {
     pub fn center_pos(&self) -> Pos2 {
-        Pos2::new(
+        pos2(
             self.screen_rect.left() + (self.screen_rect.width() / 2.0),
             self.screen_rect.top() + (self.screen_rect.height() / 2.0),
         )
@@ -194,7 +195,7 @@ struct GraphPoint {
 impl GraphPoint {
     pub fn point_on_screen(&self, graph_config: GraphConfig) -> Pos2 {
         let center = graph_config.center_pos();
-        Pos2::new(
+        pos2(
             center.x + ((self.x - graph_config.offset.x) * GRID_SIZE),
             center.y + ((-(self.y - graph_config.offset.y)) * GRID_SIZE),
         )
