@@ -3,9 +3,13 @@ name = "graphing_calculator"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 eframe = "0.28.1"
 egui = "0.28.1"
 egui_plot = "0.28.1"
 env_logger = { version = "0.11.5", default-features = false, features = ["auto-color",
     "humantime", ] }
+logos = "0.14.2"
