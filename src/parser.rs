@@ -1,4 +1,3 @@
-use egui::TextBuffer;
 use logos::Logos;
 use std::cmp::PartialEq;
 
